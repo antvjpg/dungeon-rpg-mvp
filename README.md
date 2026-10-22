@@ -26,11 +26,20 @@ e use os botoes **ATK**, **Q**, **P** e **R** na direita.
 Regras:
 
 - Derrote **todos os inimigos** do andar para descer ao proximo.
+- A **sala onde voce nasce** e uma **zona segura** (contorno verde tracejado):
+  monstros nao entram e nao causam dano enquanto voce estiver dentro dela.
 - **Pocoes verdes** ficam no chao: pise nelas para pegar (voce comeca com 2).
 - **Armaduras** (blocos metalicos) tambem ficam no chao e alguns monstros dropam.
 - Subir de nivel: **+3 de vida maxima**, **+8 de vida** e **+1 de dano** (minimo e maximo).
 - Limpar um andar cura **20% da vida maxima**.
 - Se sua vida chegar a 0, e game over (`R` reinicia).
+
+### Efeitos ao levar dano
+
+- O personagem **pisca em vermelho** e ganha uma aura pulsante.
+- A tela **treme** por alguns instantes.
+- Uma **vinheta vermelha** aparece nas bordas da tela.
+- O **numero do dano** sobe flutuando em cima do personagem.
 
 ### Armaduras
 
@@ -54,7 +63,8 @@ Regras:
 | **Golem** | roxo | muito alta | medio | muito lento | muito alto |
 
 Aparecem conforme o andar: Rato e Esqueleto desde o inicio, Orc a partir do 2, Golem a partir do 3.
-Cada tipo tem tamanho e forma diferentes (circulo ou quadrado) alem da cor.
+Cada tipo usa um **sprite proprio** (`assets/sprites/`), com tamanho diferente e
+**animacao de caminhada em 2 quadros** (quando o PNG tem 32x16).
 
 ## Como rodar
 
@@ -98,7 +108,7 @@ Projeto/
   executar.bat         Atalho: sobe o servidor e abre no navegador
   jogar_web.bat        Mesmo atalho (servidor + navegador)
   servir_web.py        Servidor HTTP local (Python, sem dependencias)
-  assets/sprites/      Pixel art 16x16 da versao antiga (opcional, nao usada)
+  assets/sprites/      Pixel art 16x16 usada no jogo (heroi, monstros, pocoes e armaduras)
   tools/
     gerar_sprites.py   Gerador dos PNGs de assets/sprites/ (opcional)
     preview_sprites.png  Folha de contato 8x dos sprites
@@ -111,12 +121,13 @@ Projeto/
 - **HTML/CSS** para o HUD e os controles de toque (escalam sozinhos em qualquer tela).
 - **Geracao procedural**: salas retangulares sem sobreposicao ligadas por corredores.
 - **Loop com delta time** (`requestAnimationFrame`), entao a velocidade nao depende do FPS.
-- Os desenhos sao formas geometricas com sombras, piscada de dano e barra de vida —
-  sem depender de arquivos de imagem.
+- **Sprites em pixel art** (`assets/sprites/`, quadros de 16x16) desenhados no canvas
+  com `imageSmoothingEnabled = false`, sombras, animacao de caminhada e barra de vida.
+  Enquanto uma imagem nao carrega, o jogo usa formas geometricas como fallback.
 
 ## Roadmap (proximos passos sugeridos)
 
-1. **Sprites**: usar os PNGs de `assets/sprites/` no canvas (hoje o jogo desenha formas).
+1. **Cenarios**: variar o visual dos andares (masmorra, caverna, castelo).
 2. **Mais atributos**: defesa, chance de critico, velocidade de ataque.
 3. **Mais itens**: pocoes grandes, equipamentos e baus com recompensa.
 4. **Mais monstros**: variantes e um **chefe** ao final de cada 5 andares.

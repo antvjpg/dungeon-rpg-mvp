@@ -69,6 +69,7 @@ let playerAtkMin = BASE_ATK_MIN;
 let playerAtkMax = BASE_ATK_MAX;
 let playerCd = 0.0;
 let facing = { x: 1, y: 0 };
+let playerWalkUntil = 0.0;
 
 let armorId = "";
 
@@ -87,6 +88,13 @@ let armorPickups = [];
 
 let dungeonGrid = [];
 let dungeonRooms = [];
+let safeRoom = null;
+
+// efeitos visuais de dano
+let playerHurt = 0.0;
+let damageFlash = 0.0;
+let shakeTime = 0.0;
+let floaters = [];
 
 // ---------- Monstros ----------
 const monsterTypes = {
@@ -101,6 +109,39 @@ const armorItems = {
     cobre: { name: "Armadura de Cobre", short: "Cobre", color: "#d98a5a", reduce: 2, tier: 1 },
     ferro: { name: "Armadura de Ferro", short: "Ferro", color: "#c9d3de", reduce: 4, tier: 2 }
 };
+
+// ---------- Sprites (pixel art 16x16, 2 quadros quando 32x16) ----------
+const SPRITE_FILES = {
+    heroi: "../assets/sprites/heroi.png",
+    rato: "../assets/sprites/rato.png",
+    esqueleto: "../assets/sprites/esqueleto.png",
+    orc: "../assets/sprites/orc.png",
+    golem: "../assets/sprites/golem.png",
+    pocao: "../assets/sprites/pocao.png",
+    cobre: "../assets/sprites/armadura_cobre.png",
+    ferro: "../assets/sprites/armadura_ferro.png"
+};
+
+const sprites = {};
+
+function loadSprites() {
+    for (const key in SPRITE_FILES) {
+        const img = new Image();
+        img.src = SPRITE_FILES[key];
+        sprites[key] = img;
+    }
+}
+
+function spriteReady(key) {
+    const img = sprites[key];
+    return !!img && img.complete && img.naturalWidth > 0;
+}
+
+function spriteFrameCount(key) {
+    const img = sprites[key];
+    if (!img || !img.naturalWidth) return 1;
+    return Math.max(1, Math.floor(img.naturalWidth / 16));
+}
 
 // =============================================================
 // GERADOR DE MASMORRA
@@ -193,6 +234,13 @@ function isFloorCell(x, y) {
     return dungeonGrid[y][x] === 1;
 }
 
+// Zona segura = sala onde o jogador nasce. Monstros nao entram e nao atacam aqui.
+function isSafeCell(x, y) {
+    if (!safeRoom) return false;
+    return x >= safeRoom.x && x < safeRoom.x + safeRoom.w &&
+           y >= safeRoom.y && y < safeRoom.y + safeRoom.h;
+}
+
 function randomFloorCell() {
     if (dungeonRooms.length === 0) return { x: -1, y: -1 };
     const room = dungeonRooms[rng.int(0, dungeonRooms.length - 1)];
@@ -211,10 +259,23 @@ function buildFloor(first) {
     playerPos = { x: info.startPos.x, y: info.startPos.y };
     facing = { x: 1, y: 0 };
 
+    safeRoom = {
+        x: dungeonRooms[0].x,
+        y: dungeonRooms[0].y,
+        w: dungeonRooms[0].w,
+        h: dungeonRooms[0].h
+    };
+
     enemies = [];
     potions = [];
     armorPickups = [];
     playerCd = 0.0;
+    playerWalkUntil = 0.0;
+
+    playerHurt = 0.0;
+    damageFlash = 0.0;
+    shakeTime = 0.0;
+    floaters = [];
 
     spawnEnemies();
     spawnPotions();
@@ -287,6 +348,7 @@ function spawnEnemies() {
         const cell = randomFloorCell();
         if (cell.x === -1) continue;
         if (Math.hypot(cell.x - playerPos.x, cell.y - playerPos.y) < 7) continue;
+        if (isSafeCell(cell.x, cell.y)) continue;
         if (enemyIndexAt(cell.x, cell.y) >= 0) continue;
         enemies.push(makeEnemy(cell));
     }
@@ -300,6 +362,7 @@ function spawnPotions() {
         const cell = randomFloorCell();
         if (cell.x === -1) continue;
         if (cell.x === playerPos.x && cell.y === playerPos.y) continue;
+        if (isSafeCell(cell.x, cell.y)) continue;
         if (enemyIndexAt(cell.x, cell.y) >= 0) continue;
         if (potions.some(p => p.x === cell.x && p.y === cell.y)) continue;
         potions.push(cell);
@@ -325,6 +388,7 @@ function spawnArmors() {
         const cell = randomFloorCell();
         if (cell.x === -1) continue;
         if (cell.x === playerPos.x && cell.y === playerPos.y) continue;
+        if (isSafeCell(cell.x, cell.y)) continue;
         if (enemyIndexAt(cell.x, cell.y) >= 0) continue;
         if (armorIndexAt(cell) >= 0) continue;
         armorPickups.push({ pos: cell, id: wanted });
@@ -385,7 +449,10 @@ function playerAct(dir) {
 
     playerCd = PLAYER_STEP_CD;
     playerPos = { x: targetX, y: targetY };
-    message = "";
+    playerWalkUntil = elapsed + 0.18;
+    message = isSafeCell(targetX, targetY)
+        ? "Zona segura: monstros nao entram aqui."
+        : "";
 
     const pIdx = potions.findIndex(p => p.x === targetX && p.y === targetY);
     if (pIdx >= 0) {
@@ -548,6 +615,19 @@ function enemyAttack(e) {
 
     playerHp -= dmg;
 
+    // animacao de dano: piscada, tremor, vinheta vermelha e numero flutuante
+    playerHurt = 0.5;
+    damageFlash = 1.0;
+    shakeTime = 0.22;
+    floaters.push({
+        x: playerPos.x,
+        y: playerPos.y,
+        text: "-" + dmg,
+        life: 0.9,
+        maxLife: 0.9,
+        color: "#ff8080"
+    });
+
     let extra = "";
     if (blocked > 0) {
         extra = " (armadura segurou " + Math.min(blocked, Math.max(0, raw - MIN_DAMAGE)) + ")";
@@ -568,6 +648,7 @@ function enemyAttack(e) {
 
 function canEnemyStep(cell) {
     if (!isFloorCell(cell.x, cell.y)) return false;
+    if (isSafeCell(cell.x, cell.y)) return false;
     if (cell.x === playerPos.x && cell.y === playerPos.y) return false;
     if (enemyIndexAt(cell.x, cell.y) >= 0) return false;
     return true;
@@ -679,9 +760,22 @@ function draw() {
     const canvas = document.getElementById("gameCanvas");
     if (!canvas) return;
     const ctx = canvas.getContext("2d");
+    ctx.imageSmoothingEnabled = false;
 
     ctx.fillStyle = COL_BG;
     ctx.fillRect(0, 0, WINDOW_W, WINDOW_H);
+
+    // tremor de tela ao levar dano
+    let shakeX = 0;
+    let shakeY = 0;
+    if (shakeTime > 0) {
+        const power = 4.2 * (shakeTime / 0.22);
+        shakeX = (Math.random() * 2 - 1) * power;
+        shakeY = (Math.random() * 2 - 1) * power;
+    }
+
+    ctx.save();
+    ctx.translate(shakeX, shakeY);
 
     // chao e paredes
     for (let y = 0; y < GRID_H; y++) {
@@ -700,22 +794,66 @@ function draw() {
         }
     }
 
+    // zona segura (sala inicial): monstros nao entram
+    if (safeRoom) {
+        ctx.fillStyle = "rgba(124,252,158,0.055)";
+        for (let y = safeRoom.y; y < safeRoom.y + safeRoom.h; y++) {
+            for (let x = safeRoom.x; x < safeRoom.x + safeRoom.w; x++) {
+                ctx.fillRect(x * TILE, y * TILE, TILE, TILE);
+            }
+        }
+
+        ctx.setLineDash([6, 4]);
+        ctx.strokeStyle = "rgba(124,252,158,0.40)";
+        ctx.lineWidth = 1.5;
+        ctx.strokeRect(
+            safeRoom.x * TILE + 1,
+            safeRoom.y * TILE + 1,
+            safeRoom.w * TILE - 2,
+            safeRoom.h * TILE - 2
+        );
+        ctx.setLineDash([]);
+        ctx.lineWidth = 1;
+
+        if (safeRoom.w >= 5) {
+            ctx.fillStyle = "rgba(124,252,158,0.55)";
+            ctx.font = "10px sans-serif";
+            ctx.textAlign = "center";
+            ctx.fillText(
+                "ZONA SEGURA",
+                (safeRoom.x + safeRoom.w / 2) * TILE,
+                safeRoom.y * TILE + 11
+            );
+            ctx.textAlign = "left";
+        }
+    }
+
     // pocoes
     for (const p of potions) {
         const c = cellCenter(p.x, p.y);
-        ctx.fillStyle = COL_POTION;
-        ctx.beginPath();
-        ctx.arc(c.x, c.y, TILE * 0.28, 0, Math.PI * 2);
-        ctx.fill();
+        if (spriteReady("pocao")) {
+            const s = 20;
+            ctx.drawImage(sprites.pocao, 0, 0, 16, 16, c.x - s / 2, c.y - s / 2, s, s);
+        } else {
+            ctx.fillStyle = COL_POTION;
+            ctx.beginPath();
+            ctx.arc(c.x, c.y, TILE * 0.28, 0, Math.PI * 2);
+            ctx.fill();
+        }
     }
 
     // armaduras no chao
     for (const ap of armorPickups) {
         const c = cellCenter(ap.pos.x, ap.pos.y);
-        ctx.fillStyle = armorItems[ap.id].color;
-        ctx.fillRect(c.x - 6, c.y - 7, 12, 14);
-        ctx.fillStyle = "rgba(0,0,0,0.35)";
-        ctx.fillRect(c.x - 3, c.y - 7, 3, 14);
+        if (spriteReady(ap.id)) {
+            const s = 21;
+            ctx.drawImage(sprites[ap.id], 0, 0, 16, 16, c.x - s / 2, c.y - s / 2, s, s);
+        } else {
+            ctx.fillStyle = armorItems[ap.id].color;
+            ctx.fillRect(c.x - 6, c.y - 7, 12, 14);
+            ctx.fillStyle = "rgba(0,0,0,0.35)";
+            ctx.fillRect(c.x - 3, c.y - 7, 3, 14);
+        }
     }
 
     // sombras
@@ -730,17 +868,41 @@ function draw() {
     for (const e of enemies) {
         const c = cellCenter(e.pos.x, e.pos.y);
         const t = monsterTypes[e.type];
-        const size = t.size * TILE;
         const walkBob = elapsed < e.walk_until ? -1.5 : 0;
-        const tint = e.flash > 0 ? "#ff5959" : t.color;
+        const frames = spriteFrameCount(e.type);
+        const walking = elapsed < e.walk_until;
 
-        ctx.fillStyle = tint;
-        if (t.shape === "circle") {
-            ctx.beginPath();
-            ctx.arc(c.x, c.y + walkBob, size, 0, Math.PI * 2);
-            ctx.fill();
+        if (spriteReady(e.type)) {
+            const size = TILE * (0.75 + t.size);
+            const frame = frames > 1 && walking
+                ? (Math.floor(elapsed * 8) + e.pos.x + e.pos.y) % frames
+                : 0;
+
+            ctx.drawImage(
+                sprites[e.type],
+                frame * 16, 0, 16, 16,
+                c.x - size / 2, c.y - size / 2 + walkBob,
+                size, size
+            );
+
+            if (e.flash > 0) {
+                ctx.fillStyle = "rgba(255,80,80,0.45)";
+                ctx.beginPath();
+                ctx.arc(c.x, c.y + walkBob, size * 0.42, 0, Math.PI * 2);
+                ctx.fill();
+            }
         } else {
-            ctx.fillRect(c.x - size, c.y - size + walkBob, size * 2, size * 2);
+            const size = t.size * TILE;
+            const tint = e.flash > 0 ? "#ff5959" : t.color;
+
+            ctx.fillStyle = tint;
+            if (t.shape === "circle") {
+                ctx.beginPath();
+                ctx.arc(c.x, c.y + walkBob, size, 0, Math.PI * 2);
+                ctx.fill();
+            } else {
+                ctx.fillRect(c.x - size, c.y - size + walkBob, size * 2, size * 2);
+            }
         }
 
         const ratio = e.hp / e.maxHp;
@@ -759,19 +921,76 @@ function draw() {
     if (armorId !== "") {
         drawEllipse(ctx, pc.x, pc.y + 6, 7.8, 3.4, armorItems[armorId].color);
     }
-    ctx.fillStyle = COL_PLAYER;
-    ctx.beginPath();
-    ctx.arc(pc.x, pc.y, TILE * 0.5 - 3.5, 0, Math.PI * 2);
-    ctx.fill();
 
-    // indicador de direcao (olhos)
-    ctx.fillStyle = "#0b0b12";
-    const ex = pc.x + facing.x * 3;
-    const ey = pc.y + facing.y * 3;
-    ctx.beginPath();
-    ctx.arc(ex - (facing.y !== 0 ? 3 : 0), ey - (facing.x !== 0 ? 3 : 0), 1.6, 0, Math.PI * 2);
-    ctx.arc(ex + (facing.y !== 0 ? 3 : 0), ey + (facing.x !== 0 ? 3 : 0), 1.6, 0, Math.PI * 2);
-    ctx.fill();
+    // piscada/aura vermelha ao levar dano
+    if (playerHurt > 0) {
+        const pulse = 0.5 + 0.5 * Math.sin(elapsed * 55);
+        ctx.fillStyle = "rgba(255,70,70," + (0.18 + 0.30 * pulse).toFixed(3) + ")";
+        ctx.beginPath();
+        ctx.arc(pc.x, pc.y, TILE * 0.5 + 3 + pulse * 2, 0, Math.PI * 2);
+        ctx.fill();
+    }
+
+    if (spriteReady("heroi")) {
+        const frames = spriteFrameCount("heroi");
+        const walking = elapsed < playerWalkUntil;
+        const frame = frames > 1 && walking ? Math.floor(elapsed * 10) % frames : 0;
+        const size = TILE + 4;
+        const blink = playerHurt > 0 && Math.floor(playerHurt * 24) % 2 === 0;
+
+        ctx.globalAlpha = blink ? 0.45 : 1;
+        ctx.drawImage(
+            sprites.heroi,
+            frame * 16, 0, 16, 16,
+            pc.x - size / 2, pc.y - size / 2,
+            size, size
+        );
+        ctx.globalAlpha = 1;
+    } else {
+        ctx.fillStyle = playerHurt > 0 && Math.floor(playerHurt * 24) % 2 === 0
+            ? "#ff7b7b"
+            : COL_PLAYER;
+        ctx.beginPath();
+        ctx.arc(pc.x, pc.y, TILE * 0.5 - 3.5, 0, Math.PI * 2);
+        ctx.fill();
+
+        // indicador de direcao (olhos)
+        ctx.fillStyle = "#0b0b12";
+        const ex = pc.x + facing.x * 3;
+        const ey = pc.y + facing.y * 3;
+        ctx.beginPath();
+        ctx.arc(ex - (facing.y !== 0 ? 3 : 0), ey - (facing.x !== 0 ? 3 : 0), 1.6, 0, Math.PI * 2);
+        ctx.arc(ex + (facing.y !== 0 ? 3 : 0), ey + (facing.x !== 0 ? 3 : 0), 1.6, 0, Math.PI * 2);
+        ctx.fill();
+    }
+
+    // numeros de dano flutuando
+    for (const f of floaters) {
+        const t = 1 - f.life / f.maxLife;
+        const fx = f.x * TILE + TILE / 2;
+        const fy = f.y * TILE + 8 - t * 22;
+        ctx.globalAlpha = Math.max(0, f.life / f.maxLife);
+        ctx.fillStyle = f.color;
+        ctx.font = "bold 13px sans-serif";
+        ctx.textAlign = "center";
+        ctx.fillText(f.text, fx, fy);
+        ctx.globalAlpha = 1;
+        ctx.textAlign = "left";
+    }
+
+    ctx.restore();
+
+    // vinheta vermelha ao levar dano
+    if (damageFlash > 0) {
+        const g = ctx.createRadialGradient(
+            WINDOW_W / 2, WINDOW_H / 2, WINDOW_H * 0.30,
+            WINDOW_W / 2, WINDOW_H / 2, WINDOW_W * 0.62
+        );
+        g.addColorStop(0, "rgba(255,0,0,0)");
+        g.addColorStop(1, "rgba(255,0,0," + (0.35 * damageFlash).toFixed(3) + ")");
+        ctx.fillStyle = g;
+        ctx.fillRect(0, 0, WINDOW_W, WINDOW_H);
+    }
 
     // overlays
     if (state === State.DEAD) {
@@ -964,6 +1183,15 @@ function processGame(delta) {
     elapsed += delta;
     playerCd = Math.max(0.0, playerCd - delta);
 
+    playerHurt = Math.max(0.0, playerHurt - delta);
+    damageFlash = Math.max(0.0, damageFlash - delta * 2.2);
+    shakeTime = Math.max(0.0, shakeTime - delta);
+
+    for (let i = floaters.length - 1; i >= 0; i--) {
+        floaters[i].life -= delta;
+        if (floaters[i].life <= 0) floaters.splice(i, 1);
+    }
+
     if (playerCd <= 0.0) {
         let dir = readKeyboardDirection();
         if (dir.x === 0 && dir.y === 0) dir = readJoystickDirection();
@@ -988,8 +1216,9 @@ function processGame(delta) {
         const d = { x: playerPos.x - e.pos.x, y: playerPos.y - e.pos.y };
         const dist = Math.max(Math.abs(d.x), Math.abs(d.y));
         const orthogonal = Math.abs(d.x) + Math.abs(d.y) === 1;
+        const playerSafe = isSafeCell(playerPos.x, playerPos.y);
 
-        if (orthogonal) {
+        if (orthogonal && !playerSafe) {
             if (e.atk_timer >= e.atk_delay) {
                 e.atk_timer = 0;
                 enemyAttack(e);
@@ -1073,6 +1302,7 @@ function newGame() {
 // =============================================================
 
 window.addEventListener("load", () => {
+    loadSprites();
     buildLegend();
     setupKeyboard();
     setupTouchControls();
