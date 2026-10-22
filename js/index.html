@@ -1,0 +1,135 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
+<meta name="theme-color" content="#0b0b12">
+<title>Dungeon RPG</title>
+<style>
+  :root { --bg:#0b0b12; --panel:#15151f; --text:#e8e8f0; --dim:#8b8ba3; }
+  * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+  html, body { height: 100%; margin: 0; }
+  body {
+    background: var(--bg); color: var(--text);
+    font-family: "Segoe UI", Roboto, Arial, sans-serif;
+    overflow: hidden; touch-action: none;
+    user-select: none; -webkit-user-select: none;
+    display: flex; flex-direction: column;
+  }
+  #hud {
+    flex: 0 0 auto;
+    background: var(--panel);
+    border-bottom: 1px solid #26263a;
+    padding: 6px 12px;
+    font-size: 14px; line-height: 1.4;
+    overflow: hidden;
+  }
+  #hud .stats { display: flex; flex-wrap: wrap; gap: 2px 16px; font-weight: 600; }
+  #hudLevel { color: #ffe08a; }
+  .hp { color: #7cfc9e; }
+  .xp { color: #5fd7ff; }
+  #hudMsg { color: #cfcfe4; min-height: 20px; }
+  #hudLegend { font-size: 12px; color: var(--dim); }
+  #wrap {
+    position: relative; flex: 1 1 auto;
+    display: flex; align-items: center; justify-content: center;
+    overflow: hidden;
+  }
+  #stage {
+    position: absolute; left: 50%; top: 50%;
+    width: 1056px; height: 616px;
+    transform: translate(-50%, -50%) scale(1);
+    transform-origin: center center;
+    will-change: transform;
+  }
+  canvas { display: block; width: 100%; height: 100%; background: #15151f; }
+  #touch { position: absolute; inset: 0; display: none; }
+  @media (hover: none), (pointer: coarse) { #touch { display: block; } }
+  #joyZone { position: absolute; left: 0; top: 0; bottom: 0; width: 50%; }
+  #joyBase {
+    position: absolute; width: 130px; height: 130px; margin: -65px 0 0 -65px;
+    border-radius: 50%; border: 2px solid rgba(255,255,255,.20);
+    background: rgba(255,255,255,.05); display: none; pointer-events: none;
+  }
+  #joyKnob {
+    position: absolute; width: 54px; height: 54px; margin: -27px 0 0 -27px;
+    border-radius: 50%; background: rgba(95,215,255,.75);
+    box-shadow: 0 0 12px rgba(95,215,255,.45); display: none; pointer-events: none;
+  }
+  .tbtn {
+    position: absolute; border-radius: 50%; border: 2px solid rgba(255,255,255,.22);
+    background: rgba(21,21,31,.60); color: #e8e8f0; font-family: inherit; font-weight: 700;
+    display: flex; align-items: center; justify-content: center;
+    padding: 0; touch-action: none; cursor: pointer;
+  }
+  .tbtn:active { background: rgba(60,60,90,.75); }
+  #btnAtk { right: 22px;  bottom: 26px;  width: 96px; height: 96px; font-size: 18px; border-color: rgba(255,120,120,.55); color: #ffb3b3; }
+  #btnQ   { right: 132px; bottom: 30px;  width: 64px; height: 64px; font-size: 16px; color: #7cfc9e; }
+  #btnP   { right: 26px;  bottom: 136px; width: 60px; height: 60px; font-size: 16px; color: #ffe08a; }
+  #btnR   { right: 100px; bottom: 108px; width: 52px; height: 52px; font-size: 15px; color: #bdbdd6; }
+  #hint {
+    position: absolute; left: 0; right: 0; bottom: 4px;
+    text-align: center; font-size: 12px; color: #55556b; pointer-events: none;
+  }
+  @media (hover: none), (pointer: coarse) { #hint { display: none; } }
+  @media (max-width: 720px) {
+    #hud { font-size: 12px; padding: 5px 8px; }
+    #hudLegend { display: none; }
+  }
+</style>
+</head>
+<body>
+
+<div id="hud">
+  <div class="stats">
+    <span id="hudLevel">Nv 1</span>
+    <span class="hp" id="hudHp">HP 30/30</span>
+    <span class="xp" id="hudXp">XP 0/14</span>
+    <span id="hudArmor">Armadura: nenhuma</span>
+    <span id="hudFloor">Andar 1</span>
+    <span id="hudEnemies">Inimigos 0</span>
+    <span id="hudPotions">Pocoes 2</span>
+    <span id="hudTime">Tempo 0:00</span>
+  </div>
+  <div id="hudMsg">&nbsp;</div>
+  <div id="hudLegend"></div>
+</div>
+
+<div id="wrap">
+  <div id="stage">
+    <canvas id="gameCanvas" width="1056" height="616"></canvas>
+  </div>
+
+  <div id="touch">
+    <div id="joyZone"></div>
+    <div id="joyBase"></div>
+    <div id="joyKnob"></div>
+    <button id="btnAtk" class="tbtn" type="button">ATK</button>
+    <button id="btnQ" class="tbtn" type="button">Q</button>
+    <button id="btnP" class="tbtn" type="button">P</button>
+    <button id="btnR" class="tbtn" type="button">R</button>
+  </div>
+
+  <div id="hint">WASD/setas mover &middot; ande contra o monstro para atacar &middot; Q pocao &middot; P pausa &middot; R reinicia</div>
+</div>
+
+<script src="game.js"></script>
+<script>
+// Ajusta o canvas para caber em qualquer tela mantendo a proporcao.
+(function () {
+  var stage = document.getElementById("stage");
+  var wrap = document.getElementById("wrap");
+  var W = 1056, H = 616;
+
+  function fit() {
+    var scale = Math.min(wrap.clientWidth / W, wrap.clientHeight / H) * 0.98;
+    stage.style.transform = "translate(-50%, -50%) scale(" + scale + ")";
+  }
+
+  window.addEventListener("resize", fit);
+  window.addEventListener("orientationchange", fit);
+  fit();
+})();
+</script>
+</body>
+</html>
